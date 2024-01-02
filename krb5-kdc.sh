@@ -68,7 +68,8 @@ validate_args() {
 
 start_service() {
   echo "Enabling systemd services ..."
-  systemctl enable --now krb5kdc kadmin chronyd
+  systemctl enable --now krb5kdc
+  systemctl enable --now kadmin
 }
 
 add_principal() {   
