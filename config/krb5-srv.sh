@@ -2,10 +2,11 @@
 
 usage() {
    echo "Usage: krb5-setup.sh [COMMAND] [OPTIONS] [VALUE]"
-   echo " -d|--domain           Domain name"
-   echo " -h|--host             Hostname"
+   echo " -d|--domain            Domain name"
+   echo " -h|--host              Hostname"
    echo " -i|--ip                Host IP"
    echo " -s|--service-type      Service principal name account (SPN)"
+   echo " -u|--user              KDC admin username"
    echo " --help                 Print help"
    echo ""
    echo "Example:"
@@ -67,9 +68,16 @@ validate_args() {
 }
 
 start_service() {
-  echo "Enabling systemd services ..."
-  systemctl enable --now krb5kdc
-  systemctl enable --now kadmin
+   echo "Enabling systemd services ..."
+   systemctl enable --now krb5kdc
+   systemctl enable --now kadmin
+
+   echo "Verifying krb5kdc and kamdin services are running ..."
+   local _krb5kdc=$(systemctl status krb5kdc.service | grep -i "(running)")
+   local _kadmin=$(systemctl status kadmin.service | grep -i "(running)")
+
+   [ ! $_krb5kdc ] && abnormal_exit "krb5kdc service is not running"
+   [ ! $_kadmin ] && abnormal_exit "kadmin service is not running"
 }
 
 add_principal() {   
@@ -81,30 +89,51 @@ add_principal() {
    #   * Instance: Specifies the name of the server hosting the application. For example: finance1.us.example.com
    #   * Realm: Specifies the domain name of the server hosting the application. For example: US.EXAMPLE.COM
 
-   echo "Adding admin principal for root ..."
-   kadmin.local -q "addprinc root/admin"
+   if [ -n "$USER" ]; then
+      echo "Adding admin principal for $USER ..."
+      read
+      kadmin.local -q "addprinc $USER/admin"
+   else
+      echo "User not specified, adding principle for root..."
+      read
+      kadmin.local -q "addprinc root/admin"
+   fi
    
-   echo "Adding service principal name (SPN) account to keytab ..."
+#   echo "Adding service principal name (SPN) account to keytab ..."
+#   for i in "${!HOSTS[@]}"; do
+#      #kadmin.local "addprinc ${SERVICE_TYPE[$i]}/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
+#      kadmin "addprinc host/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
+#   done
+}
 
-   for i in "${!HOSTS[@]}"; do
-      kadmin.local "addprinc ${SERVICE_TYPE[$i]}/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
-   done
+get_ticket() {
+   if [ -n "$USER" ]; then
+      echo "Obtaining ticket granting ticket for $USER ..."
+      kinit $USER
+   else
+      echo "Obtaining ticket granting ticket for root ..."
+      kinit root
+   fi
+
+   klist
 }
 
 keytab_add() {
    echo "Adding principals that are authorized to use Kerberos authentication"
    
    for i in "${!HOSTS[@]}"; do
-      kadmin.local -q "ktadd ${SERVICE_TYPE[$i]}/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
+      #echo "Adding: ${SERVICE_TYPE[$i]}/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
+      kadmin.local "ktadd ${SERVICE_TYPE[$i]}/${HOSTS[$i]}.$(echo $DOMAIN | tr [:upper:] [:lower:])"
    done
 }
 
 setup_kdc() {
    echo "Creating kerberos database ... "
    kdb5_util create -s
-   start_service
    add_principal
-   keytab_add
+   start_service
+   get_ticket   
+#   keytab_add
 }
 
 get_args() {
@@ -127,6 +156,10 @@ get_args() {
 	    SERVICE_TYPE+=($2)
 	    shift 2
 	    ;;
+	  -u|--user)
+	    USER=$2
+	    shift 2
+	    ;;
 	  --help)
 	    usage
 	    shift 1
@@ -140,11 +173,11 @@ get_args() {
 
 main() {
     get_args $@
-    validate_args
+    #validate_args
     is_root
-    add_host
-    edit_config
-    setup_kdc
+    #add_host
+    #edit_config
+    #setup_kdc
 }
 
 main $@
